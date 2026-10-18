@@ -1,0 +1,5 @@
+setting,test_acc,final_val_loss,steps_to_LoRA_val_loss
+LoRA (tuned),53.400000000000006,0.6302587985992432,259
+LoRA+ (both towers),53.2,0.6726621389389038,296
+λ only in vision encoder,53.6,0.6746858954429626,333
+λ only in language decoder,54.0,0.6234538555145264,222

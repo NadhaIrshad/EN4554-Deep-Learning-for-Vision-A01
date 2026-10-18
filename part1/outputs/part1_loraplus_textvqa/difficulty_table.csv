@@ -1,0 +1,13 @@
+method,cat,mean,std,count
+baseline,answer in OCR,45.93,,1
+baseline,answer not in OCR,22.97,,1
+bonus_text_lr0.0001_r16,answer in OCR,58.53,,1
+bonus_text_lr0.0001_r16,answer not in OCR,35.45,,1
+bonus_vision_lr0.0001_r16,answer in OCR,54.7,,1
+bonus_vision_lr0.0001_r16,answer not in OCR,31.57,,1
+main_LoRA_tuned_lr0.0005_r1,answer in OCR,56.57,1.61,3
+main_LoRA_tuned_lr0.0005_r1,answer not in OCR,32.94,2.68,3
+main_LoRAplus_drop-in_lr0.0005_r16,answer in OCR,4.09,0.46,3
+main_LoRAplus_drop-in_lr0.0005_r16,answer not in OCR,16.49,1.36,3
+main_LoRAplus_tuned_lr0.0001_r16,answer in OCR,53.64,0.33,3
+main_LoRAplus_tuned_lr0.0001_r16,answer not in OCR,32.19,0.36,3

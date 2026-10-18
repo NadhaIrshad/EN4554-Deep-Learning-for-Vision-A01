@@ -1,0 +1,49 @@
+# Smoke-test outputs (python ... --quick)
+part1/outputs/part1_loraplus_quick/
+**/outputs/*_quick/
+
+# Trainer scratch dirs inside each run
+**/runs/*/tmp/
+
+# Logs
+*.log
+
+# Python / Jupyter
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# Model weights / checkpoints, in case any get saved later
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.ckpt
+checkpoint-*/
+
+# Hugging Face / tool caches and secrets
+.cache/
+wandb/
+.env
+
+# Editor / OS
+.vscode/
+.DS_Store
+
+# Superseded results (pre-fix soft-accuracy backup)
+**/outputs/*_backup*/
+
+# Downloaded papers (cite/link instead of committing)
+LoRA.pdf
+LoRA+.pdf
+
+# Internal team briefing (shared directly, not part of the deliverable)
+part1/report/Part1_briefing_for_team.pdf
+
+# LaTeX build artefacts
+*.aux
+*.out
+*.synctex.gz
+*.fdb_latexmk
+*.fls
+*.toc

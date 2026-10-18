@@ -1,0 +1,5 @@
+method,cat,gap_vs_LoRA,gap_std
+main_LoRAplus_drop-in_lr0.0005_r16,answer in OCR,-52.47208931419457,1.417574867195466
+main_LoRAplus_drop-in_lr0.0005_r16,answer not in OCR,-16.45072634471928,3.9318765224639
+main_LoRAplus_tuned_lr0.0001_r16,answer in OCR,-2.9239766081871372,1.298967753627921
+main_LoRAplus_tuned_lr0.0001_r16,answer not in OCR,-0.7459756576364391,2.9828692443223495

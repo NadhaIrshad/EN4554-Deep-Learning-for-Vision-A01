@@ -1,0 +1,4 @@
+method,eta_A,ratio,width_scale,test_acc,test_acc_std,final_val_loss,steps_to_ref_val_loss,n_seeds
+LoRA (tuned),0.0002,1.0,False,54.0,0.0,0.6312786340713501,296.0,1
+LoRA+ (tuned),0.0001,4.0,False,53.0,0.0,0.663119375705719,296.0,1
+LoRA+ (drop-in 16),0.0002,16.0,False,46.800000000000004,0.0,0.7172002196311951,,1

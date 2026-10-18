@@ -64,16 +64,17 @@ a.set_title(r"(a) Per-step update balance (0 = balanced), VQAv2, 3 seeds", loc="
 a.legend(frameon=False, fontsize=6.5, loc="upper left", ncol=1)
 a.yaxis.grid(True, color=GRID, lw=0.5); a.set_axisbelow(True); a.tick_params(length=0)
 
-bt = pd.read_csv(f"{T}/bonus_table.csv").set_index("setting").test_acc
-rows = [("LoRA (tuned)", "LoRA, tuned"), ("λ only in language decoder", r"$\lambda$=16 text only"),
-        ("λ only in vision encoder", r"$\lambda$=16 vision only"), ("LoRA+ (both towers)", r"$\lambda$=16 both")]
-yv = [bt[k] for k, _ in rows]
-b.barh(range(len(rows)), yv, color=SERIES[0], height=0.6, edgecolor="white")
-for i, v in enumerate(yv):
-    b.text(v + 0.3, i, f"{v:.1f}", va="center", fontsize=7, color=INK)
+tw = pd.read_csv(f"{T}/tower_table.csv").set_index("method")
+rows = [("lambda=1 (neither)", r"$\lambda$=1 (neither)"), ("lambda text only", r"$\lambda$=16 text only"),
+        ("lambda vision only", r"$\lambda$=16 vision only"), ("lambda both", r"$\lambda$=16 both")]
+yv = [tw.loc[k, "test_acc"] for k, _ in rows]; ye = [tw.loc[k, "test_acc_std"] for k, _ in rows]
+b.barh(range(len(rows)), yv, xerr=ye, color=SERIES[0], height=0.6, edgecolor="white",
+       error_kw=dict(ecolor=INK2, lw=0.9, capsize=2.5))
+for i, (v, e) in enumerate(zip(yv, ye)):
+    b.text(v + e + 0.3, i, f"{v:.1f}", va="center", fontsize=7, color=INK)
 b.set_yticks(range(len(rows)), [l for _, l in rows]); b.invert_yaxis()
-b.set_xlim(35, 48); b.set_xlabel("TextVQA test accuracy (%)")
-b.set_title("(b) Which tower tolerates LoRA+? (seed 42)", loc="left")
+b.set_xlim(35, 48.5); b.set_xlabel("TextVQA test accuracy (%)")
+b.set_title(r"(b) $\lambda$ per tower, $\eta_A$=1e-4, 3 seeds", loc="left")
 b.xaxis.grid(True, color=GRID, lw=0.5); b.set_axisbelow(True); b.tick_params(length=0)
 plt.tight_layout(w_pad=2)
 plt.savefig(f"{HERE}/fig_mechanism.png", dpi=300, bbox_inches="tight")

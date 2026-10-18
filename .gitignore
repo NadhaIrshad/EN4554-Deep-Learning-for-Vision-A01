@@ -34,8 +34,8 @@ wandb/
 **/outputs/*_backup*/
 
 # Downloaded papers (cite/link instead of committing)
-LoRA.pdf
-LoRA+.pdf
+#LoRA.pdf
+#LoRA+.pdf
 
 # Internal team briefing (shared directly, not part of the deliverable)
 part1/report/Part1_briefing_for_team.pdf

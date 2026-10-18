@@ -23,10 +23,18 @@ parser.add_argument("--quick", action="store_true", help="tiny smoke test of the
 parser.add_argument("--dataset", default="vqav2", choices=["vqav2", "textvqa"],
                     help="vqav2 = merve/vqav2-small; textvqa = harder OCR-heavy task (10 answers, split by image)")
 parser.add_argument("--out-dir", default=None, help="output directory (default ./outputs/part1_loraplus[_quick])")
-parser.add_argument("--experiment", default="main", choices=["main", "delta", "connector"],
+parser.add_argument("--experiment", default="main", choices=["main", "delta", "connector", "tower", "single"],
                     help="main = grid + main comparison + bonus; delta = paper's per-step efficiency terms "
                          "(delta_A, delta_B) for the main configs, 1 seed; connector = LoRA also on the "
-                         "vision->text connector, global vs width-scaled lambda, 3 seeds")
+                         "vision->text connector, global vs width-scaled lambda, 3 seeds; tower = 2x2 ablation of "
+                         "lambda in the vision encoder x language decoder, 3 seeds; single = one full-budget run "
+                         "from scratch with --lr-a/--ratio/--seed (no grid; for reproducing a main result on Colab)")
+parser.add_argument("--lr-a", type=float, default=2e-4, help="single: eta_A")
+parser.add_argument("--ratio", type=float, default=1.0, help="single: lambda = eta_B / eta_A (1 = plain LoRA)")
+parser.add_argument("--seed", type=int, default=42, help="single: training seed")
+parser.add_argument("--seeds", type=int, nargs="+", default=None, help="tower: override the training seeds")
+parser.add_argument("--arms", nargs="+", default=None, choices=["neither", "text", "vision", "both"],
+                    help="tower: run only these arms (to split the ablation across GPUs)")
 parser.add_argument("--stage", default="all", choices=["baseline", "grid", "main", "all"],
                     help="stop after this stage (all = baseline + grid + main + bonus)")
 cli = parser.parse_args()
@@ -83,7 +91,7 @@ if cli.dataset == "textvqa":
     # Harder, OCR-heavy task: tests the paper's caveat that LoRA+ matters more when feature learning is needed.
     # Validation split only (5000 Qs, 10 answers each), split by image like VQAv2. Smaller re-tuning grid.
     DATASET = "lmms-lab-encoder/textvqa"
-    GRID_LR_A, GRID_RATIO = [1e-4, 2e-4, 5e-4], [1, 4, 16]
+    GRID_LR_A, GRID_RATIO = [1e-4, 2e-4, 5e-4, 1e-3], [1, 4, 16]   # 1e-3 added: 5e-4 was the edge of the grid
 
 QUICK = cli.quick
 if QUICK:
@@ -381,6 +389,15 @@ print(f"baseline: val {100*baseline['val_acc']:.2f}% | test {100*baseline['test_
 if cli.stage == "baseline":
     raise SystemExit
 
+# ---- Single run from scratch (reproduces one main-table cell without the grid; e.g. on Colab) -----------------
+if cli.experiment == "single":
+    r = run(f"single_lr{cli.lr_a:g}_r{cli.ratio:g}_s{cli.seed}", cli.lr_a, cli.ratio, cli.seed, MAIN_EPOCHS, N_TRAIN,
+            probe_acc=True, eval_test=True)
+    print(f"\n=== single run: eta_A={cli.lr_a:g} lambda={cli.ratio:g} seed={cli.seed} ({cli.dataset}) ===\n"
+          f"zero-shot test {100*baseline['test_acc']:.2f}%  ->  adapted test {100*r['test_acc']:.2f}%  "
+          f"(val {100*r['val_acc']:.2f}%, final val loss {r['val_loss'][-1][1]:.4f}, {r['train_min']:.1f} min)")
+    raise SystemExit
+
 # ---- 6b. (eta_A, lambda) grid — H1 -----------------------------------------------------------------------------
 # lambda = 1 column is standard LoRA swept over LRs, so "LoRA+ only wins because B has a larger LR" is ruled out
 # if the best cell has lambda > 1 and beats every lambda = 1 cell.
@@ -421,6 +438,15 @@ if cli.experiment != "main":
                "LoRA+ (tuned)":      dict(lr_A=lr_plus, ratio=lam),
                "LoRA+ (drop-in 16)": dict(lr_A=lr_lora, ratio=16)}
         seeds, lora_targets, probe_acc = SEEDS[:1], TARGET_REGEX, False
+    elif cli.experiment == "tower":
+        # Bonus: 2x2 factorial — lambda on the B matrices of the language decoder (yes/no) x vision encoder (yes/no),
+        # all at the tuned LoRA+ eta_A, so the lambda effect of each tower is separated from the learning-rate change.
+        arms = {"neither": ("lambda=1 (neither)", dict(lr_A=lr_plus, ratio=1)),
+                "text":    ("lambda text only",   dict(lr_A=lr_plus, ratio=1, ratio_text=lam, ratio_vision=1)),
+                "vision":  ("lambda vision only", dict(lr_A=lr_plus, ratio=1, ratio_text=1, ratio_vision=lam)),
+                "both":    ("lambda both",        dict(lr_A=lr_plus, ratio=lam))}
+        exp = {name: c for key, (name, c) in arms.items() if not cli.arms or key in cli.arms}
+        seeds, lora_targets, probe_acc = cli.seeds or SEEDS, TARGET_REGEX, True
     else:
         # Bonus: the connector (fan-in 12288) is ~16-21x wider than any other layer. LoRA+ theory says the optimal
         # eta_B/eta_A grows with fan-in, so a single global lambda is wrong for a VLM -> width-scaled lambda.
@@ -431,8 +457,21 @@ if cli.experiment != "main":
     slug = lambda k: re.sub(r"[^A-Za-z0-9]+", "_", k.replace("+", "plus")).strip("_")
     xres = {k: [run(f"{cli.experiment}_{slug(k)}_lr{c['lr_A']:g}_r{c['ratio']:g}_s{s}", c["lr_A"], c["ratio"], s,
                     MAIN_EPOCHS, N_TRAIN, probe_acc=probe_acc, eval_test=True, lora_targets=lora_targets,
-                    width_scale=c.get("width_scale", False)) for s in seeds]
+                    width_scale=c.get("width_scale", False), ratio_text=c.get("ratio_text"),
+                    ratio_vision=c.get("ratio_vision")) for s in seeds]
             for k, c in exp.items()}
+    if cli.experiment == "tower" and len(xres) == 4:
+        # main effects of lambda per tower, paired by seed: average over the other tower's two levels
+        acc = {k: {r["seed"]: 100 * r["test_acc"] for r in rs} for k, rs in xres.items()}
+        common = sorted(set.intersection(*[set(v) for v in acc.values()]))
+        n, t, v, b = (acc[k] for k in ["lambda=1 (neither)", "lambda text only", "lambda vision only", "lambda both"])
+        eff = pd.DataFrame([dict(seed=s, text_effect=((t[s] - n[s]) + (b[s] - v[s])) / 2,
+                                 vision_effect=((v[s] - n[s]) + (b[s] - t[s])) / 2,
+                                 interaction=(b[s] - v[s]) - (t[s] - n[s])) for s in common])
+        eff.to_csv(f"{OUT_DIR}/tower_effects.csv", index=False)
+        print(f"\n=== tower: main effect of lambda={lam:g} per tower (test acc points, paired by seed) ===\n",
+              eff.round(2).to_string(index=False), "\n mean:", eff.drop(columns="seed").mean().round(2).to_dict(),
+              "\n std: ", eff.drop(columns="seed").std(ddof=0).round(2).to_dict())
 
     ref_runs = next(iter(xres.values()))                       # first config is the LoRA reference
     tgt_loss = np.mean([r["val_loss"][-1][1] for r in ref_runs])
@@ -487,23 +526,33 @@ target_loss = np.mean([r["val_loss"][-1][1] for r in lora_runs])           # LoR
 def first_step(curve, ok):
     return next((s for s, v in curve if ok(v)), np.nan)
 
+def steps_summary(steps):
+    # seeds that reached the target, and the median step counting never-reached seeds as +inf
+    # (so the median is defined only when at least half the seeds got there) — avoids nanmean hiding failures
+    x = np.array([np.inf if not np.isfinite(s) else s for s in steps], dtype=float)
+    med = float(np.median(x))
+    return int(np.isfinite(x).sum()), (med if np.isfinite(med) else np.nan)
+
 rows = [dict(method="Baseline (zero-shot)", test_acc=100 * baseline["test_acc"])]
 for k, runs in main.items():
     ta = [100 * r["test_acc"] for r in runs]
-    s_acc  = [first_step(r["acc_curve"], lambda v: v >= target_acc) for r in runs]
-    s_loss = [first_step(r["val_loss"], lambda v: v <= target_loss) for r in runs]
+    n_acc, med_acc = steps_summary([first_step(r["acc_curve"], lambda v: v >= target_acc) for r in runs])
+    n_loss, med_loss = steps_summary([first_step(r["val_loss"], lambda v: v <= target_loss) for r in runs])
     rows.append(dict(method=k, eta_A=runs[0]["lr_A"], ratio=runs[0]["ratio"],
                      test_acc=np.mean(ta), test_acc_std=np.std(ta),
                      final_train_loss=np.mean([r["train_loss"][-1][1] for r in runs]),
                      final_val_loss=np.mean([r["val_loss"][-1][1] for r in runs]),
-                     steps_to_95pct_LoRA_acc=np.nanmean(s_acc), steps_to_LoRA_val_loss=np.nanmean(s_loss),
+                     acc95_reached=f"{n_acc}/{len(runs)}", acc95_median_step=med_acc,
+                     loss_reached=f"{n_loss}/{len(runs)}", loss_median_step=med_loss,
                      max_grad_norm=np.max([r["max_grad_norm"] for r in runs]),
                      trainable_pct=100 * runs[0]["trainable"] / runs[0]["total"], train_min=np.mean([r["train_min"] for r in runs])))
 res_tbl = pd.DataFrame(rows)
-lo = res_tbl.set_index("method").loc["LoRA (tuned)"]
-res_tbl["speedup_vs_LoRA (loss)"] = lo.steps_to_LoRA_val_loss / res_tbl.steps_to_LoRA_val_loss
 res_tbl.to_csv(f"{OUT_DIR}/main_table.csv", index=False)
-print(f"\n=== Main table (H2a/H2b) ===\ntarget val acc = {100*target_acc:.2f}%   target val loss = {target_loss:.4f}   (seeds {SEEDS})")
+r0 = lora_runs[0]
+acc_res = int(np.diff([s for s, _ in r0["acc_curve"]]).min()) if len(r0["acc_curve"]) > 1 else 0
+loss_res = int(np.diff([s for s, _ in r0["val_loss"]]).min()) if len(r0["val_loss"]) > 1 else 0
+print(f"\n=== Main table (H2a/H2b) ===\ntarget val acc = {100*target_acc:.2f}%   target val loss = {target_loss:.4f}   "
+      f"(seeds {SEEDS}; val acc checked every ~{acc_res} steps, val loss every ~{loss_res} steps)")
 print(res_tbl.round(4).to_string(index=False))
 
 fig, axes = plt.subplots(1, 3, figsize=(18, 4.5))
